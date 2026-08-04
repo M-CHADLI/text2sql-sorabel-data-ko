@@ -419,31 +419,145 @@ constater ce que `run_query()` laisse effectivement passer aujourd'hui.
 
 ---
 
-## État de la suite de tests
+## Partie E — Chantiers du brief
 
-Mesuré avant (`git stash` des modifications) et après :
+Conception préalable : [docs/note-conception.md](docs/note-conception.md).
+Constats numérotés d'après [docs/note-diagnostic.md](docs/note-diagnostic.md).
+
+### E1 — V1 · harnais de vérification — [evaluation.py](evaluation.py)
+
+`load_test_questions()` renvoyait `[]` : les tests paramétrés passaient au vert
+sur un ensemble vide. Corrigé en lisant réellement le JSON. Traité **en
+premier** — sans instrument de mesure, aucune correction n'est démontrable.
+
+Effet : 5 tests d'exactitude passent, et l'erreur de lint `json importé mais
+inutilisé` disparaît d'elle-même — elle n'était qu'un symptôme.
+
+### E2 — C1 + C2 · agrégation multi-sources — [sources/](sources/)
+
+| Constat | Correctif |
+|---|---|
+| **C1** pagination | `fetch_all()` suit `next_cursor` ; bornes anti-boucle (curseurs vus, plafond 100 pages) |
+| **C1** quota `429` | retry `tenacity` dans `base.py`, **partagé** — un quota est une propriété du transport, pas de la source. Ne réessaie que sur `429` ; `reraise=True` pour ne jamais renvoyer une collecte partielle en silence |
+| **C1** normalisation | `source_two.normalize()` projette enfin `ref`/`label`/`town`/`ts` vers le schéma commun |
+| **C2** clé | `normalize_key()` applique `strip()` + `lower()` |
+| **C2** fraîcheur | dates **parsées** et ramenées en UTC |
+| **C2** fusion | valeur renseignée prime, dans l'ordre du plus frais au plus ancien |
+
+**Piège évité — le mélange de fuseaux.** Comparer une date naïve à une date
+avec fuseau lève `TypeError: can't compare offset-naive and offset-aware
+datetimes` en Python. Les deux mocks étant naïfs aujourd'hui, le tri
+fonctionnait ; il aurait planté au premier changement de format côté source.
+`parse_horodatage()` ramène tout en aware UTC, avec une convention explicite :
+une date sans fuseau est **supposée UTC**. Une date illisible n'est ni devinée
+ni avalée — l'enregistrement est conservé, classé en dernier, et l'anomalie
+journalisée.
+
+**Résultat sur les sources réelles :**
 
 | | Avant | Après |
 |---|---|---|
-| Échecs | 13 | 13 |
-| Succès | 3 | 3 |
-| Ignorés | 1 | 1 |
+| Collectés | 3 (page 2 perdue) | **4** |
+| Consolidés | 3, dont 1 doublon et 1 client absent | **3 clients justes** |
 
-**Aucune régression.** Les 13 échecs sont les défauts du kit à corriger : ils
-constituent la feuille de route des chantiers du brief.
+`fr-001` est fusionné à la version du 2024-04-01 et tracé
+`['source_one', 'source_two']` ; `fr-003` est présent.
 
-Les deux erreurs `make lint` / `make typecheck` sont également préexistantes et
-sans rapport avec les modifications ci-dessus :
+### E3 — G1 + G2 · garde-fous SQL — [sql/](sql/)
 
-- `evaluation.py:5` — `json` importé mais inutilisé, conséquence directe de
-  `load_test_questions()` qui renvoie `[]` au lieu de lire le fichier.
-- `sql/generator.py:31` — `Item "object" has no attribute "invoke"`.
+Traités **d'un bloc** : corriger l'un sans l'autre laisse le comportement
+inchangé.
+
+**G1** — [sql/guard.py](sql/guard.py) réécrit sur `sqlglot` : la validation
+porte sur l'arbre syntaxique, plus sur du texte. Trois contrôles, **un seul
+parsing**, dans l'ordre instruction unique → lecture seule → périmètre. Compter
+d'abord rend légitime l'analyse de `instructions[0]` ; l'inverse ignorerait
+silencieusement les instructions suivantes.
+
+Changement de principe : passage d'une **denylist** (`WRITE_KEYWORDS`, supprimé)
+à une **allowlist** — seul `SELECT` est autorisé. Une liste d'interdits laisse
+passer tout ce qu'elle oublie (`COPY`, `CALL`, `MERGE`, `VACUUM`…).
+
+**G2** — [sql/executor.py](sql/executor.py) appelle `ensure_safe()` avant toute
+exécution. Le contrôle est au point de passage obligé, non sur le chemin
+nominal : aucun appelant ne peut le contourner.
+
+**Mesures :**
+
+| | Avant | Après |
+|---|---|---|
+| Requêtes adverses bloquées | 0/8 | **8/8** |
+| Requêtes légitimes acceptées | — | **7/7** |
+| Questions de référence exactes | 4/4 | **4/4** |
+
+Les deux faux positifs de l'ancienne regex sont levés : `SELECT * FROM
+public.clients` et `WITH t AS (…) SELECT * FROM t` passent désormais.
+
+### E4 — Défense en profondeur · rôle PostgreSQL — [roles.py](roles.py)
+
+Rôle `sorabel_agent` en lecture seule, créé par `make roles`. Deux connexions :
+`DB_URL` (propriétaire, pour `seed.py`) et `AGENT_DB_URL` (agent). Droits
+accordés **table par table** d'après `ALLOWED_TABLES` — une table ajoutée plus
+tard reste inaccessible par défaut.
+
+Mesuré : `DELETE`, `UPDATE`, `INSERT`, `TRUNCATE`, `CREATE` et `DROP` sont
+refusés par le moteur ; `SELECT * FROM utilisateurs` aussi.
+
+**Limite documentée** : `information_schema` reste interrogeable — PostgreSQL
+l'expose à tous les rôles, filtré selon les privilèges (4 tables visibles sur
+5). C'est le garde-fou applicatif qui le refuse. Les deux couches sont
+complémentaires, aucune ne remplace l'autre.
+
+### E5 — Schéma introspecté — [sql/generator.py](sql/generator.py)
+
+La description des tables envoyée au LLM était écrite en dur, donc à maintenir
+à chaque évolution du schéma. Elle est désormais lue dans `information_schema`,
+qui reflète l'état **réel** de la base là où `db.py` reflète l'état *déclaré* —
+les deux peuvent diverger (`ALTER TABLE` direct, migration hors SQLAlchemy).
+
+Lecture faite **côté application**, mise en cache, bornée par `ALLOWED_TABLES`
+et par les privilèges du rôle. L'agent n'interroge jamais le catalogue
+lui-même : le garde-fou peut donc continuer à refuser `information_schema` dans
+le SQL généré, sans contradiction.
+
+Gain secondaire : l'introspection ramène les **types** (`boolean`,
+`double precision`, `date`), absents du prompt en dur.
 
 ---
 
-## Reste à faire — chantiers du brief
+## État de la suite de tests
 
-Aucun de ces trois chantiers n'est entamé à ce stade.
+Progression mesurée à chaque étape :
+
+| Étape | Échecs | Succès |
+|---|---|---|
+| Commit de départ `a035fbb` | 13 | 3 |
+| Déblocage de l'environnement (parties A–D) | 12 | 4 |
+| Après E1 — harnais de vérification | 5 | 11 |
+| Après E2 — agrégation | 5 | 11 |
+| **Après E3 — garde-fous** | **0** | **20** |
+
+**Suite intégralement au vert**, `make lint` compris. L'erreur `json importé
+mais inutilisé` a disparu avec E1 : elle n'était qu'un symptôme de
+`load_test_questions()` qui ne lisait pas le fichier.
+
+**Critères de performance du brief :**
+
+| Critère | État |
+|---|---|
+| Les requêtes générées sont valides et sûres | ✅ 8/8 adverses bloquées, 7/7 légitimes acceptées |
+| Les réponses chiffrées sont exactes sur le jeu de test | ✅ 4/4 |
+| L'agrégation ne contient plus de doublons ni de données périmées | ✅ 4 collectés → 3 clients justes |
+
+Reste `make typecheck` : `sql/generator.py` — `Item "object" has no attribute
+"invoke"`, dû au paramètre `llm` typé `object | None`. Sans effet à l'exécution.
+
+---
+
+## Chantiers du brief — état final
+
+Les trois chantiers sont traités (détail en partie E). Le relevé ci-dessous est
+conservé : il documente l'état de départ auquel chaque correctif répond.
 
 ### 1. Text-to-SQL sécurisé
 

@@ -10,7 +10,7 @@ import os
 
 from langchain_core.tools import tool
 
-from db import engine_from_env
+from db import agent_engine
 from sources.aggregate import aggregate
 from sources.base import build_client
 from sql.executor import run_query
@@ -31,7 +31,7 @@ def run_sql_query(question: str) -> str:
     Args:
         question: La question en français, telle que posée par l'utilisateur.
     """
-    engine = engine_from_env("DB_URL")
+    engine = agent_engine()
     sql = generate_sql(question)
     rows = run_query(sql, engine)
     return str(rows)

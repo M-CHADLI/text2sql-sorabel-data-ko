@@ -33,7 +33,7 @@ if str(RACINE) not in sys.path:
 
 load_dotenv(RACINE / ".env")
 
-from db import engine_from_env  # noqa: E402
+from db import agent_engine  # noqa: E402
 from evaluation import QUESTIONS_PATH, load_test_questions  # noqa: E402
 from sources.aggregate import aggregate, normalize_key  # noqa: E402
 from sql.executor import run_query  # noqa: E402
@@ -56,7 +56,8 @@ KO = "❌"
 # --------------------------------------------------------------------------
 @st.cache_resource
 def get_engine():
-    return engine_from_env("DB_URL")
+    """Engine de l'agent — rôle lecture seule si `make roles` a été joué."""
+    return agent_engine()
 
 
 def read_questions() -> list[dict[str, Any]]:
@@ -337,7 +338,7 @@ with onglet_bac:
                 motifs.append("instructions enchaînées")
             st.error(
                 f"{KO} **Requête risquée acceptée** — " + " ; ".join(motifs) + ". "
-                "C'est le défaut R1 de la note de diagnostic : `ensure_safe()` "
+                "C'est le défaut G1 de la note de diagnostic : `ensure_safe()` "
                 "détecte sans jamais lever."
             )
 
