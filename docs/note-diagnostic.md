@@ -1,5 +1,7 @@
 # Note de diagnostic — agent Sorabel
 
+> [README](../README.md) · [Présentation](presentation.md) · **Diagnostic** · [Conception](note-conception.md) · [Prise en main](prise-en-main.md) · [Journal](../JOURNAL.md) · [Brief](../brief-agent-text-to-sql.md)
+
 **Objet.** Définir le périmètre du problème à partir de
 [data/questions_test.json](../data/questions_test.json), en identifiant les
 requêtes générées qui échouent ou sont risquées. Livrable §1 du

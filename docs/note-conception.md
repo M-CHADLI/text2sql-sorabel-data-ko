@@ -1,5 +1,7 @@
 # Note de conception — garde-fous SQL
 
+> [README](../README.md) · [Présentation](presentation.md) · [Diagnostic](note-diagnostic.md) · **Conception** · [Prise en main](prise-en-main.md) · [Journal](../JOURNAL.md) · [Brief](../brief-agent-text-to-sql.md)
+
 **Objet.** Définir les garde-fous SQL, la stratégie de fiabilisation de
 l'agrégation et la vérification d'exactitude. Livrable §2 du
 [brief](../brief-agent-text-to-sql.md), suite de la

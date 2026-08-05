@@ -1,5 +1,7 @@
 # Journal des corrections
 
+> [README](README.md) · [Présentation](docs/presentation.md) · [Diagnostic](docs/note-diagnostic.md) · [Conception](docs/note-conception.md) · [Prise en main](docs/prise-en-main.md) · **Journal** · [Brief](brief-agent-text-to-sql.md)
+
 Livrable du brief [brief-agent-text-to-sql.md](brief-agent-text-to-sql.md) :
 *« Consigner cause et correctifs dans un journal. »*
 
@@ -7,6 +9,73 @@ Chaque entrée suit le même format : **symptôme observé → cause identifiée
 correctif appliqué → vérification**. Les entrées sont classées par nature, car
 elles ne relèvent pas toutes du même chantier : certaines débloquent
 l'environnement de travail, d'autres corrigent le code lui-même.
+
+---
+
+## Avant / après par étape du brief
+
+Synthèse chiffrée, étape par étape. Le détail de chaque correctif est en
+partie E ; la conception qui les précède est dans
+[docs/note-conception.md](docs/note-conception.md).
+
+### §1 — Diagnostiquer les requêtes générées
+
+| Indicateur | Avant | Après |
+|---|---|---|
+| Requêtes problématiques identifiées | aucune analyse | **8 relevées**, avec cause et famille de risque |
+| Note de diagnostic + schéma | inexistants | [docs/note-diagnostic.md](docs/note-diagnostic.md) |
+| Reproductibilité de la mesure | — | `recettes/campagne_texttosql.py` |
+
+*Découverte structurante* : 4/4 réponses exactes sur le jeu fourni. Le symptôme
+annoncé par le brief — « des chiffres faux » — n'est pas reproductible par la
+voie Text-to-SQL. Le risque y est de **sécurité**, l'inexactitude vient de
+l'agrégation. Le plan de travail en découle.
+
+### §3 — Génération Text-to-SQL sécurisée
+
+| Indicateur | Avant | Après |
+|---|---|---|
+| Requêtes adverses bloquées | **0/8** | **8/8** |
+| Requêtes légitimes acceptées | 5/7 *(2 faux positifs)* | **7/7** |
+| Méthode de validation | expression régulière | **arbre syntaxique** (`sqlglot`) |
+| Politique de lecture seule | denylist `WRITE_KEYWORDS` | **allowlist** — seul `SELECT` |
+| Point d'application | aucun — `ensure_safe()` jamais appelé | **`run_query()`**, non contournable |
+| Protection moteur | aucune | rôle PostgreSQL en lecture seule |
+| Tests `test_sql_guard` | 0/5 | **5/5** |
+
+Les deux faux positifs levés : `SELECT * FROM public.clients` (schéma qualifié)
+et `WITH t AS (…) SELECT * FROM t` (alias de CTE), tous deux refusés à tort par
+la regex.
+
+### §4 — Agrégation multi-sources fiabilisée
+
+| Indicateur | Avant | Après |
+|---|---|---|
+| Enregistrements collectés | 3 *(1 page sur 2)* | **4** |
+| Clients au référentiel | 3 *(1 doublon, 1 absent)* | **3 justes** |
+| `FR-001` | présent 2 fois, version périmée | **fusionné**, version 2024-04-01 |
+| `FR-003` | absent | **présent** |
+| Normalisation `source_two` | aucune (clés brutes) | schéma commun |
+| Retry sur `429` | absent | `tenacity`, partagé |
+| Comparaison des dates | chaînes | **datetime UTC** |
+| Tests `test_aggregate` + `test_sources` | 0/7 | **7/7** |
+
+*Piège évité* : comparer une date naïve à une date avec fuseau lève
+`TypeError`. Les deux mocks étant naïfs, le tri fonctionnait — il aurait planté
+au premier changement de format côté source.
+
+### §5 — Vérifier l'exactitude et documenter
+
+| Indicateur | Avant | Après |
+|---|---|---|
+| Questions chargées par `load_test_questions()` | **0** sur 4 | **4** sur 4 |
+| Valeur de la suite de tests | vert sur un ensemble vide | mesure réelle |
+| Suite complète | 13 échecs / 3 succès | **0 échec / 20 succès** |
+| `make lint` | 1 erreur | **au vert** |
+| Journal des corrections | inexistant | ce document |
+
+Traité **en premier** parmi les correctifs : sans instrument de mesure fiable,
+aucune correction n'est démontrable.
 
 État de référence au démarrage : commit `a035fbb`, suite de tests à
 **13 échecs / 3 succès / 1 ignoré**.
@@ -522,6 +591,63 @@ le SQL généré, sans contradiction.
 
 Gain secondaire : l'introspection ramène les **types** (`boolean`,
 `double precision`, `date`), absents du prompt en dur.
+
+---
+
+## Vérification finale — livrable §5
+
+Mesures relevées sur l'état final du dépôt, toutes reproductibles.
+
+### Exactitude sur le jeu de test
+
+```bash
+uv run python recettes/campagne_texttosql.py
+```
+
+```
+Référence : 4/4 réponses exactes
+Adverses  : 8/8 bloquées par le garde-fou
+            0/8 ont modifié les données
+```
+
+Les quatre questions traversent la chaîne complète — `generate_sql()` →
+`ensure_safe()` → `run_query()` — avec le SQL **réellement généré par le LLM**,
+non le SQL de référence du JSON. Le critère *« les réponses chiffrées sont
+exactes sur le jeu de test »* est vérifié de bout en bout.
+
+Le troisième chiffre est le plus significatif : lors du diagnostic initial,
+1 requête adverse sur 8 avait détruit une table (`DROP TABLE
+lignes_commande`). Aucune n'atteint plus la base.
+
+### Contrôles qualité
+
+| Commande | Résultat |
+|---|---|
+| `make test` | **20 passed** |
+| `make lint` | **All checks passed** |
+| `make typecheck` | **Success: no issues found in 14 source files** |
+
+`make typecheck` passe pour la première fois du projet : le paramètre `llm` de
+`generate_sql()` était typé `object`, qui n'expose pas `invoke`. Remplacé par un
+`Protocol` décrivant le contrat réellement utilisé — plus juste qu'un
+`type: ignore`, et documenté pour l'appelant.
+
+### Conformité de la base
+
+```bash
+docker compose exec -T db psql -U sorabel -d sorabel -f - < recettes/recette_seed.sql
+```
+
+**20 contrôles, 20 OK** — contexte, structure, cardinalités, valeurs du jeu de
+référence, intégrité référentielle, cohérence métier.
+
+### Synthèse des critères de performance
+
+| Critère du brief | Mesure |
+|---|---|
+| Les requêtes générées sont valides et sûres | 8/8 adverses bloquées · 7/7 légitimes acceptées |
+| Les réponses chiffrées sont exactes sur le jeu de test | 4/4 |
+| L'agrégation ne contient plus de doublons ni de données périmées | 4 collectés → 3 clients justes |
 
 ---
 

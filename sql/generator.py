@@ -14,12 +14,23 @@ Le résultat est mis en cache : le schéma ne change pas entre deux questions.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from sql.guard import ALLOWED_TABLES
+
+
+class ModeleChat(Protocol):
+    """Contrat minimal attendu d'un modèle de chat.
+
+    Décrit ce que ``generate_sql`` utilise réellement, sans dépendre d'une
+    implémentation : tout objet exposant ``invoke`` convient, y compris un
+    faux modèle en test.
+    """
+
+    def invoke(self, entree: Any, /) -> Any: ...
 
 # Utilisée si la base est injoignable — l'agent doit pouvoir échouer
 # proprement plutôt que de ne pas démarrer.
@@ -86,7 +97,7 @@ def build_prompt(question: str, schema: str) -> str:
 
 def generate_sql(
     question: str,
-    llm: object | None = None,
+    llm: ModeleChat | None = None,
     engine: Engine | None = None,
 ) -> str:
     """Génère une requête SQL pour ``question``."""
@@ -105,6 +116,6 @@ def generate_sql(
     except Exception:  # noqa: BLE001 — base injoignable : on dégrade, sans bloquer
         schema = SCHEMA_DE_SECOURS
 
-    message: Any = llm.invoke(build_prompt(question, schema))  # type: ignore[attr-defined]
+    message = llm.invoke(build_prompt(question, schema))
     contenu = getattr(message, "content", message)
     return str(contenu).strip().strip("`").removeprefix("sql").strip()

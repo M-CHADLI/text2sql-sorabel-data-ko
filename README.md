@@ -1,5 +1,7 @@
 # sorabel-data-ko
 
+> **README** · [Présentation](docs/presentation.md) · [Diagnostic](docs/note-diagnostic.md) · [Conception](docs/note-conception.md) · [Prise en main](docs/prise-en-main.md) · [Journal](JOURNAL.md) · [Brief](brief-agent-text-to-sql.md)
+
 Couche d'accès aux données de l'assistant **Sorabel**. Le service traduit des
 questions en langage naturel en requêtes SQL exécutées sur la base de
 démonstration, et agrège en parallèle des données provenant de plusieurs
@@ -195,13 +197,20 @@ SQLite en mémoire alimentée par les mêmes données que la démo
 └── tests/                     Suite pytest
 ```
 
-## Livrables du brief
+## Documentation
 
-| Livrable | Fichier | État |
+| Document | Contenu | Pour qui |
 |---|---|---|
-| Note de diagnostic + schéma du flux | [docs/note-diagnostic.md](docs/note-diagnostic.md) | fait |
-| Journal des corrections | [JOURNAL.md](JOURNAL.md) | en cours |
-| PR : Text-to-SQL sécurisé, agrégation fiabilisée | — | à faire |
+| [Présentation](docs/presentation.md) | architecture, schémas avant/après, arborescence commentée | vue d'ensemble |
+| [Note de diagnostic](docs/note-diagnostic.md) | le problème, le schéma de flux, le relevé des requêtes dangereuses | livrable §1 |
+| [Note de conception](docs/note-conception.md) | garde-fous, agrégation, vérification — décisions justifiées | livrable §2 |
+| [Journal des corrections](JOURNAL.md) | avant/après par étape, puis cause → correctif → vérification | livrable |
+| [Prise en main](docs/prise-en-main.md) | installation, lecture guidée, plan de présentation | nouvel arrivant |
+| [Brief](brief-agent-text-to-sql.md) | l'énoncé d'origine | référence |
+
+**Par où commencer** : la [présentation](docs/presentation.md) pour l'ensemble
+du projet, puis la [prise en main](docs/prise-en-main.md) pour installer et
+exécuter.
 
 ## Banc d'essai Streamlit
 
